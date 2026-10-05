@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import json
+import os
 from sklearn.impute import KNNImputer
 from apps.core.logger import Logger
 
@@ -10,7 +11,7 @@ class Preprocessor:
     *****************************************************************************
     *
     * filename:       preprocessor.py
-    * version:        1.0
+    * version:        1.1
     * author:         KidIsKing
     * creation date:  05-OCT-2026
     *
@@ -19,6 +20,7 @@ class Preprocessor:
     * who                when           version  change (include bug# if apply)
     * ------------       -----------    -------  ------------------------------
     * YanaMasalova       05-OCT-2026    1.0      initial creation
+    * Copilot            05-OCT-2026    1.1      typed features and data paths
     *
     *
     * description:    Class to pre-process training and predict dataset
@@ -30,6 +32,12 @@ class Preprocessor:
         self.run_id = run_id
         self.data_path = data_path
         self.logger = Logger(self.run_id, "Preprocessor", mode)
+
+    def _subdirectory(self, suffix):
+        return os.path.join(
+            self.data_path,
+            os.path.basename(os.path.normpath(self.data_path)) + "_" + suffix,
+        )
 
     def get_data(self):
         """
@@ -47,7 +55,9 @@ class Preprocessor:
         try:
             # reading the data file
             self.logger.info("Start of reading dataset...")
-            self.data = pd.read_csv(self.data_path + "_validation/InputFile.csv")
+            self.data = pd.read_csv(
+                os.path.join(self._subdirectory("validation"), "InputFile.csv")
+            )
             self.logger.info("End of reading dataset...")
             return self.data
         except Exception as e:
@@ -113,7 +123,7 @@ class Preprocessor:
                     data.isna().sum()
                 )
                 dataframe_with_null.to_csv(
-                    self.data_path + "_validation/" + "null_values.csv"
+                    os.path.join(self._subdirectory("validation"), "null_values.csv")
                 )  # storing the null column information to file
             self.logger.info("End of finding missing values...")
             return self.null_present
@@ -232,6 +242,8 @@ class Preprocessor:
                 f.close()
             df = pd.DataFrame(data=None, columns=data_columns)
             df_new = pd.concat([df, data], ignore_index=True, sort=False)
+            for column in data_columns:
+                df_new[column] = pd.to_numeric(df_new[column], errors="coerce")
             data_new = df_new.fillna(0)
             self.logger.info("End of building final predictset...")
             return data_new

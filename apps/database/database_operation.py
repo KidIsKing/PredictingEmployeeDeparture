@@ -1,6 +1,5 @@
 import sqlite3
 import csv
-from os import listdir
 import shutil
 import os
 
@@ -12,7 +11,7 @@ class DatabaseOperation:
     *****************************************************************************
     *
     * file_name:      database_operation.py
-    * version:        1.0
+    * version:        1.1
     * author:         KidIsKing
     * creation date:  05-OCT-2026
     *
@@ -21,6 +20,7 @@ class DatabaseOperation:
     * who                when           version  change (include bug# if apply)
     * ------------       -----------    -------  ------------------------------
     * YanaMasalova       05-OCT-2026    1.0      initial creation
+    * Copilot            05-OCT-2026    1.1      safe CSV import and data paths
     *
     *
     * description:    Class to handle database operations
@@ -32,6 +32,12 @@ class DatabaseOperation:
         self.run_id = run_id
         self.data_path = data_path
         self.logger = Logger(self.run_id, "DatabaseOperation", mode)
+
+    def _subdirectory(self, suffix):
+        return os.path.join(
+            self.data_path,
+            os.path.basename(os.path.normpath(self.data_path)) + "_" + suffix,
+        )
 
     def database_connection(self, database_name):
         """
@@ -131,39 +137,44 @@ class DatabaseOperation:
         """
         conn = self.database_connection(database_name)
         good_data_path = self.data_path
-        bad_data_path = self.data_path + "_rejects"
-        only_files = [f for f in listdir(good_data_path)]
+        bad_data_path = self._subdirectory("rejects")
+        only_files = [
+            file
+            for file in os.listdir(good_data_path)
+            if os.path.isfile(os.path.join(good_data_path, file))
+            and file.lower().endswith(".csv")
+        ]
         self.logger.info("Start of Inserting Data into Table...")
-        for file in only_files:
-            try:
-                with open(good_data_path + "/" + file, "r") as f:
-                    next(f)
-                    reader = csv.reader(f, delimiter=",")
-                    for line in enumerate(reader):
-                        # self.logger.info(" %s: nu!!" % line[1])
-                        to_db = ""
-                        for list_ in line[1]:
-                            try:
-                                to_db = to_db + ",'" + list_ + "'"
-                            except Exception as e:
-                                raise e
-                        # self.logger.info(" %s: list_!!" % to_db.lstrip(','))
-                        to_db = to_db.lstrip(",")
-                        conn.execute(
+        try:
+            for file in only_files:
+                file_path = os.path.join(good_data_path, file)
+                try:
+                    with open(file_path, "r", newline="") as data_file:
+                        reader = csv.reader(data_file, delimiter=",")
+                        next(reader, None)
+                        rows = [tuple(row) for row in reader]
+
+                    if rows:
+                        placeholders = ",".join("?" for _ in rows[0])
+                        conn.executemany(
                             "INSERT INTO "
                             + table_name
-                            + " values ({values})".format(values=(to_db))
+                            + " VALUES ("
+                            + placeholders
+                            + ")",
+                            rows,
                         )
-                        conn.commit()
-
-            except Exception as e:
-                conn.rollback()
-                self.logger.exception(
-                    "Exception raised while Inserting Data into Table: %s " % e
-                )
-                shutil.move(good_data_path + "/" + file, bad_data_path)
-                conn.close()
-        conn.close()
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    self.logger.exception(
+                        "Exception raised while Inserting Data into Table: %s " % e
+                    )
+                    if os.path.isfile(file_path):
+                        shutil.move(file_path, bad_data_path)
+                    raise
+        finally:
+            conn.close()
         self.logger.info("End of Inserting Data into Table...")
 
     def export_csv(self, database_name, table_name):
@@ -179,7 +190,7 @@ class DatabaseOperation:
         * Parameters
         *   database_name:
         """
-        self.file_from_db = self.data_path + str("_validation/")
+        self.file_from_db = self._subdirectory("validation")
         self.file_name = "InputFile.csv"
         try:
             self.logger.info("Start of Exporting Data into CSV...")
@@ -195,7 +206,7 @@ class DatabaseOperation:
                 os.makedirs(self.file_from_db)
             # Open CSV file for writing.
             csv_file = csv.writer(
-                open(self.file_from_db + self.file_name, "w", newline=""),
+                open(os.path.join(self.file_from_db, self.file_name), "w", newline=""),
                 delimiter=",",
                 lineterminator="\r\n",
                 quoting=csv.QUOTE_ALL,

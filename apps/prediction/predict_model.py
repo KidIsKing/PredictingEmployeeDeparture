@@ -1,4 +1,5 @@
 import pandas as pd
+import os
 from apps.core.logger import Logger
 from apps.ingestion.load_validate import LoadValidate
 from apps.preprocess.preprocessor import Preprocessor
@@ -10,7 +11,7 @@ class PredictModel:
     *****************************************************************************
     *
     * filename:       predict_model.py
-    * version:        1.0
+    * version:        1.1
     * author:         KidIsKing
     * creation date:  05-OCT-2026
     *
@@ -19,6 +20,7 @@ class PredictModel:
     * who                when           version  change (include bug# if apply)
     * ------------       -----------    -------  ------------------------------
     * YanaMasalova       05-OCT-2026    1.0      initial creation
+    * Copilot            05-OCT-2026    1.1      numeric prediction preprocessing
     *
     *
     * description:    Class to prediction the result
@@ -33,6 +35,9 @@ class PredictModel:
         self.loadValidate = LoadValidate(self.run_id, self.data_path, "prediction")
         self.preProcess = Preprocessor(self.run_id, self.data_path, "prediction")
         self.fileOperation = FileOperation(self.run_id, self.data_path, "prediction")
+
+    def _results_directory(self):
+        return os.path.join(self.data_path, "prediction_data_results")
 
     def batch_predict_from_model(self):
         """
@@ -54,6 +59,11 @@ class PredictModel:
             self.loadValidate.validate_predictset()
             # preprocessing activities
             self.X = self.preProcess.preprocess_predictset()
+            if self.X.empty:
+                raise ValueError(
+                    "Prediction input is empty. Add a CSV file with at least "
+                    "one data row to the prediction input directory."
+                )
             # load model
             kmeans = self.fileOperation.load_model("KMeans")
             # cluster selection
@@ -74,7 +84,9 @@ class PredictModel:
                     {"EmpId": cluster_data["empid"], "Prediction": y_predicted}
                 )
                 result.to_csv(
-                    self.data_path + "_results/" + "Predictions.csv",
+                    os.path.join(
+                        self._results_directory(), "Predictions.csv"
+                    ),
                     header=True,
                     mode="a+",
                     index=False,
@@ -102,6 +114,8 @@ class PredictModel:
             self.logger.info("run_id:" + str(self.run_id))
             # preprocessing activities
             self.X = self.preProcess.preprocess_predict(data)
+            if self.X.empty:
+                raise ValueError("Prediction input is empty.")
             # load model
             kmeans = self.fileOperation.load_model("KMeans")
             # cluster selection

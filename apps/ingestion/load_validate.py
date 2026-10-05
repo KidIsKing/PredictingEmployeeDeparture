@@ -1,5 +1,4 @@
 import json
-from os import listdir
 import shutil
 import pandas as pd
 from datetime import datetime
@@ -13,7 +12,7 @@ class LoadValidate:
     *****************************************************************************
     *
     * filename:       load_validate.py
-    * version:        1.0
+    * version:        1.1
     * author:         KidIsKing
     * creation date:  05-OCT-2026
     *
@@ -22,6 +21,7 @@ class LoadValidate:
     * who                when           version  change (include bug# if apply)
     * ------------       -----------    -------  ------------------------------
     * YanaMasalova       05-OCT-2026    1.0      initial creation
+    * Copilot            05-OCT-2026    1.1      safe validation and data paths
     *
     *
     * description:    Class to load, validate and transform the data
@@ -34,6 +34,29 @@ class LoadValidate:
         self.data_path = data_path
         self.logger = Logger(self.run_id, "LoadValidate", mode)
         self.dbOperation = DatabaseOperation(self.run_id, self.data_path, mode)
+
+    def _csv_files(self):
+        return [
+            file
+            for file in os.listdir(self.data_path)
+            if os.path.isfile(os.path.join(self.data_path, file))
+            and file.lower().endswith(".csv")
+        ]
+
+    def _require_csv_files(self):
+        files = self._csv_files()
+        if not files:
+            message = "No CSV input files found. Path: "
+            raise FileNotFoundError(
+                message + self.data_path
+            )
+        return files
+
+    def _subdirectory(self, suffix):
+        return os.path.join(
+            self.data_path,
+            os.path.basename(os.path.normpath(self.data_path)) + "_" + suffix,
+        )
 
     def values_from_schema(self, schema_file):
         """
@@ -84,13 +107,14 @@ class LoadValidate:
         """
         try:
             self.logger.info("Start of Validating Column Length...")
-            for file in listdir(self.data_path):
-                csv = pd.read_csv(self.data_path + "/" + file)
+            for file in self._csv_files():
+                file_path = os.path.join(self.data_path, file)
+                csv = pd.read_csv(file_path)
                 if csv.shape[1] == number_of_columns:
                     pass
                 else:
                     shutil.move(
-                        self.data_path + "/" + file, self.data_path + "_rejects"
+                        file_path, self._subdirectory("rejects")
                     )
                     self.logger.info("Invalid Columns Length :: %s" % file)
 
@@ -120,14 +144,15 @@ class LoadValidate:
         """
         try:
             self.logger.info("Start of Validating Missing Values...")
-            for file in listdir(self.data_path):
-                csv = pd.read_csv(self.data_path + "/" + file)
+            for file in self._csv_files():
+                file_path = os.path.join(self.data_path, file)
+                csv = pd.read_csv(file_path)
                 count = 0
                 for columns in csv:
                     if (len(csv[columns]) - csv[columns].count()) == len(csv[columns]):
                         count += 1
                         shutil.move(
-                            self.data_path + "/" + file, self.data_path + "_rejects"
+                            file_path, self._subdirectory("rejects")
                         )
                         self.logger.info("All Missing Values in Column :: %s" % file)
                         break
@@ -157,17 +182,23 @@ class LoadValidate:
         """
         try:
             self.logger.info("Start of Replacing Missing Values with NULL...")
-            only_files = [f for f in listdir(self.data_path)]
+            only_files = self._csv_files()
             for file in only_files:
-                csv = pd.read_csv(self.data_path + "/" + file)
-                csv.fillna("NULL", inplace=True)
-                csv.to_csv(self.data_path + "/" + file, index=None, header=True)
+                file_path = os.path.join(self.data_path, file)
+                csv = pd.read_csv(file_path)
+                for column in csv.columns:
+                    if pd.api.types.is_numeric_dtype(csv[column]):
+                        csv[column] = csv[column].fillna(csv[column].median())
+                    else:
+                        csv[column] = csv[column].fillna("NULL")
+                csv.to_csv(file_path, index=None, header=True)
                 self.logger.info("%s: File Transformed successfully!!" % file)
             self.logger.info("End of Replacing Missing Values with NULL...")
         except Exception as e:
             self.logger.exception(
                 "Exception raised while Replacing Missing Values with NULL: %s" % e
             )
+            raise
 
     def archive_old_files(self):
         """
@@ -187,66 +218,70 @@ class LoadValidate:
         time = now.strftime("%H%M%S")
         try:
             self.logger.info("Start of Archiving Old Rejected Files...")
-            source = self.data_path + "_rejects/"
+            source = self._subdirectory("rejects")
             if os.path.isdir(source):
-                path = self.data_path + "_archive"
+                path = self._subdirectory("archive")
                 if not os.path.isdir(path):
                     os.makedirs(path)
-                dest = path + "/reject_" + str(date) + "_" + str(time)
+                dest = os.path.join(path, "reject_" + str(date) + "_" + str(time))
                 files = os.listdir(source)
                 for f in files:
                     if not os.path.isdir(dest):
                         os.makedirs(dest)
                     if f not in os.listdir(dest):
-                        shutil.move(source + f, dest)
+                        shutil.move(os.path.join(source, f), dest)
 
             self.logger.info("End of Archiving Old Rejected Files...")
 
             self.logger.info("Start of Archiving Old Validated Files...")
-            source = self.data_path + "_validation/"
+            source = self._subdirectory("validation")
             if os.path.isdir(source):
-                path = self.data_path + "_archive"
+                path = self._subdirectory("archive")
                 if not os.path.isdir(path):
                     os.makedirs(path)
-                dest = path + "/validation_" + str(date) + "_" + str(time)
+                dest = os.path.join(
+                    path, "validation_" + str(date) + "_" + str(time)
+                )
                 files = os.listdir(source)
                 for f in files:
                     if not os.path.isdir(dest):
                         os.makedirs(dest)
                     if f not in os.listdir(dest):
-                        shutil.move(source + f, dest)
+                        shutil.move(os.path.join(source, f), dest)
 
             self.logger.info("End of Archiving Old Validated Files...")
 
             self.logger.info("Start of Archiving Old Processed Files...")
-            source = self.data_path + "_processed/"
+            source = self._subdirectory("processed")
             if os.path.isdir(source):
-                path = self.data_path + "_archive"
+                path = self._subdirectory("archive")
                 if not os.path.isdir(path):
                     os.makedirs(path)
-                dest = path + "/processed_" + str(date) + "_" + str(time)
+                dest = os.path.join(
+                    path, "processed_" + str(date) + "_" + str(time)
+                )
                 files = os.listdir(source)
                 for f in files:
                     if not os.path.isdir(dest):
                         os.makedirs(dest)
                     if f not in os.listdir(dest):
-                        shutil.move(source + f, dest)
+                        shutil.move(os.path.join(source, f), dest)
 
             self.logger.info("End of Archiving Old Processed Files...")
 
             self.logger.info("Start of Archiving Old Result Files...")
-            source = self.data_path + "_results/"
+            source = self._subdirectory("results")
             if os.path.isdir(source):
-                path = self.data_path + "_archive"
+                path = self._subdirectory("archive")
                 if not os.path.isdir(path):
                     os.makedirs(path)
-                dest = path + "/results_" + str(date) + "_" + str(time)
+                dest = os.path.join(path, "results_" + str(date) + "_" + str(time))
                 files = os.listdir(source)
                 for f in files:
                     if not os.path.isdir(dest):
                         os.makedirs(dest)
                     if f not in os.listdir(dest):
-                        shutil.move(source + f, dest)
+                        shutil.move(os.path.join(source, f), dest)
 
             self.logger.info("End of Archiving Old Result Files...")
         except Exception as e:
@@ -270,8 +305,10 @@ class LoadValidate:
         """
         try:
             self.logger.info("Start of Moving Processed Files...")
-            for file in listdir(self.data_path):
-                shutil.move(self.data_path + "/" + file, self.data_path + "_processed")
+            for file in self._csv_files():
+                shutil.move(
+                    os.path.join(self.data_path, file), self._subdirectory("processed")
+                )
                 self.logger.info("Moved the already processed file %s" % file)
 
             self.logger.info("End of Moving Processed Files...")
@@ -296,6 +333,7 @@ class LoadValidate:
         """
         try:
             self.logger.info("Start of Data Load, validation and transformation")
+            self._require_csv_files()
             # archive old  files
             self.archive_old_files()
             # extracting values from training schema
@@ -338,6 +376,7 @@ class LoadValidate:
         """
         try:
             self.logger.info("Start of Data Load, validation and transformation")
+            self._require_csv_files()
             # archive old rejected files
             self.archive_old_files()
             # extracting values from schema
