@@ -13,7 +13,9 @@ PredictingEmployeeDeparture/
 │   │   └── logger.py                   # Логи
 │   ├── database/                       # Код, отвечающий за операции над базой данных
 │   │   └── database_operation.py
-│   ├── ingestion/                      # Код для загрузки данных
+│   │   └── schema_predict.py           # Структура базы данных для проверки файлов предсказаний
+│   │   └── schema_train.py             # Структура базы данных для проверки файлов обучения
+│   ├── ingestion/                      # Код для загрузки и проверки данных
 │   │   └── load_validate.py
 │   ├── models/
 │   ├── prediction/                     # Код для обработки файлов с прогнозом
